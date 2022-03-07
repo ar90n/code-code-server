@@ -1,8 +1,8 @@
 package main
 
 import (
-	"codecodeserver"
 	"fmt"
+	"github.com/ar90n/codecodeserver"
 	"github.com/flynn/json5"
 	"github.com/urfave/cli/v2"
 	"io/ioutil"
