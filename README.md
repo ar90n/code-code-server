@@ -53,6 +53,7 @@ Extension 'golang.go' v0.31.1 was successfully installed.
 
 And you can access to the code server by the above URL which is `http://tororo.local:58818/?folder=/workspace/code-code-server`.
 
+![スクリーンショット 2022-03-07 22 29 31](https://user-images.githubusercontent.com/2285892/157044688-6c1ed4e2-1426-459e-b489-644b6ec9d25b.png)
 
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
