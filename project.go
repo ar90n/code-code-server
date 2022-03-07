@@ -204,9 +204,6 @@ func getWorkspaceFolder(devcontainer DevContainer) (string, error) {
 
 func createEntryScriptCommands(devcontainer DevContainer) ([]string, error) {
 	scriptCommands := []string{`#!/bin/bash`, `set -e`, `set -x`, devcontainer.PostCreateCommand}
-	for _, v := range devcontainer.Extensions {
-		scriptCommands = append(scriptCommands, fmt.Sprintf("code-server --install-extension %s", v))
-	}
 	scriptCommands = append(scriptCommands, `echo "auth: none" > /tmp/config.yml`)
 	scriptCommands = append(scriptCommands, `code-server --user-data-dir /opt/code-server/.vscode --config /tmp/config.yml --bind-addr 0.0.0.0:8080`)
 	return scriptCommands, nil
@@ -239,6 +236,24 @@ func createSettingJson(devcontainer DevContainer) (string, error) {
 	return result, nil
 }
 
+func modifyCodeServerDirPermissions(devcontainer DevContainer) (string, error) {
+	dockerfileCommands := []string{
+		`RUN chmod -R o+wr /opt/code-server/`,
+	}
+	result := strings.Join(dockerfileCommands, "\n")
+	return result, nil
+}
+
+func installExtensions(devcontainer DevContainer) (string, error) {
+	commands := []string{}
+	for _, v := range devcontainer.Extensions {
+		commands = append(commands, fmt.Sprintf("RUN code-server --install-extension %s --extensions-dir /opt/code-server/.vscode/extensions/", v))
+	}
+
+	result := strings.Join(commands, "\n")
+	return result, nil
+}
+
 const (
 	CodeServerInstall = `RUN curl -fsSL https://code-server.dev/install.sh | sh`
 	Entrypoint        = `ENTRYPOINT ["/opt/code-server/entrypoint.sh"]`
@@ -250,7 +265,18 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	entryScriptCreation, err := createEntryScript(devcontainer)
+	if err != nil {
+		return "", err
+	}
+
+	extensionsInstallation, err := installExtensions(devcontainer)
+	if err != nil {
+		return "", err
+	}
+
+	codeServerDirPermissionModification, err := modifyCodeServerDirPermissions(devcontainer)
 	if err != nil {
 		return "", err
 	}
@@ -261,7 +287,14 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 	}
 
 	dockerfileContent := string(dockerfile)
-	dockerfileContent = strings.Join([]string{dockerfileContent, CodeServerInstall, settingJsonCreation, entryScriptCreation, Entrypoint}, "\n")
+	dockerfileContent = strings.Join([]string{
+		dockerfileContent,
+		CodeServerInstall,
+		settingJsonCreation,
+		entryScriptCreation,
+		extensionsInstallation,
+		codeServerDirPermissionModification,
+		Entrypoint}, "\n")
 
 	return dockerfileContent, nil
 }
