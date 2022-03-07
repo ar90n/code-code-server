@@ -85,7 +85,6 @@ func BuildImage(devcontainer DevContainer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println(dockerfileContent)
 
 	tag := getImageTag(devcontainer)
 	context := devcontainer.DirPath
