@@ -77,6 +77,7 @@ func (c *ContainerContext) waitForSignal() {
 
 func getImageTag(devcontainer DevContainer) string {
 	name := strings.ToLower(devcontainer.Name)
+	name = strings.ReplaceAll(name, " ", "_")
 	return fmt.Sprintf("%s_code_coder_server", name)
 }
 
