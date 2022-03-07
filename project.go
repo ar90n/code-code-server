@@ -204,8 +204,7 @@ func getWorkspaceFolder(devcontainer DevContainer) (string, error) {
 
 func createEntryScriptCommands(devcontainer DevContainer) ([]string, error) {
 	scriptCommands := []string{`#!/bin/bash`, `set -e`, `set -x`, devcontainer.PostCreateCommand}
-	scriptCommands = append(scriptCommands, `echo "auth: none" > /tmp/config.yml`)
-	scriptCommands = append(scriptCommands, `code-server --user-data-dir /opt/code-server/.vscode --config /tmp/config.yml --bind-addr 0.0.0.0:8080`)
+	scriptCommands = append(scriptCommands, `code-server --user-data-dir /opt/code-server/.vscode --config /opt/code-server/config.yml --bind-addr 0.0.0.0:8080`)
 	return scriptCommands, nil
 }
 
@@ -254,6 +253,10 @@ func installExtensions(devcontainer DevContainer) (string, error) {
 	return result, nil
 }
 
+func createConfigYaml(container DevContainer) (string, error) {
+	return `RUN echo "auth: none" > /opt/code-server/config.yml`, nil
+}
+
 const (
 	CodeServerInstall = `RUN curl -fsSL https://code-server.dev/install.sh | sh`
 	Entrypoint        = `ENTRYPOINT ["/opt/code-server/entrypoint.sh"]`
@@ -281,6 +284,11 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 		return "", err
 	}
 
+	configYamlCreation, err := createConfigYaml(devcontainer)
+	if err != nil {
+		return "", err
+	}
+
 	settingJsonCreation, err := createSettingJson(devcontainer)
 	if err != nil {
 		return "", err
@@ -293,6 +301,7 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 		settingJsonCreation,
 		entryScriptCreation,
 		extensionsInstallation,
+		configYamlCreation,
 		codeServerDirPermissionModification,
 		Entrypoint}, "\n")
 
