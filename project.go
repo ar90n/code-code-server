@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"github.com/buildkite/interpolate"
 	"io/ioutil"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 type PortAttribute struct {
@@ -44,6 +47,39 @@ func (s *ServiceURL) String() string {
 	return fmt.Sprintf("http://%s:%d/?folder=%s", s.Host, s.Port, s.WorkspaceFolder)
 }
 
+type ContainerContext struct {
+	cmd  *exec.Cmd
+	name string
+}
+
+func (c *ContainerContext) Run() error {
+	if err := c.cmd.Start(); err != nil {
+		return err
+	}
+	defer c.cmd.Wait()
+
+	c.waitForSignal()
+	return c.stop()
+}
+
+func (c *ContainerContext) stop() error {
+	cmd := exec.Command("docker", "kill", c.name)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (c *ContainerContext) waitForSignal() {
+	s := make(chan os.Signal)
+	signal.Notify(s, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+	<-s
+}
+
+func getImageTag(devcontainer DevContainer) string {
+	name := strings.ToLower(devcontainer.Name)
+	return fmt.Sprintf("%s_code_coder_server", name)
+}
+
 func BuildImage(devcontainer DevContainer) (string, error) {
 	dockerfileContent, err := wrapDockerFile(devcontainer)
 	if err != nil {
@@ -51,7 +87,7 @@ func BuildImage(devcontainer DevContainer) (string, error) {
 	}
 	fmt.Println(dockerfileContent)
 
-	tag := fmt.Sprintf("%s_code_coder_server", devcontainer.Name)
+	tag := getImageTag(devcontainer)
 	context := devcontainer.DirPath
 
 	args := []string{"build", "-t", tag, "-f", "-"}
@@ -168,36 +204,6 @@ func getWorkspaceFolder(devcontainer DevContainer) (string, error) {
 	return interpolate.Interpolate(mapEnv, workspaceFolder)
 }
 
-func CreateRunCmd(tag string, devcontainer DevContainer, serviceURL ServiceURL) (*exec.Cmd, error) {
-	portBinding := fmt.Sprintf("0.0.0.0:%d:8080", serviceURL.Port)
-	args := []string{"run", "--rm", "-p", portBinding}
-
-	workspaceBinding, err := getWorkspaceBinding(devcontainer)
-	if err != nil {
-		return nil, err
-	}
-	args = append(args, "--mount", workspaceBinding)
-
-	args = append(args, "-w", serviceURL.WorkspaceFolder)
-
-	for _, v := range devcontainer.RunArgs {
-		args = append(args, v)
-	}
-	for _, v := range devcontainer.ForwardPorts {
-		args = append(args, "-p", v)
-	}
-	if devcontainer.RemoteUser != "" {
-		args = append(args, "-u", devcontainer.RemoteUser)
-	}
-	args = append(args, tag)
-	args = append(args)
-
-	cmd := exec.Command("docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd, nil
-}
-
 func createEntryScriptCommands(devcontainer DevContainer) ([]string, error) {
 	scriptCommands := []string{`#!/bin/bash`, `set -e`, `set -x`, devcontainer.PostCreateCommand}
 	for _, v := range devcontainer.Extensions {
@@ -245,4 +251,49 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 	dockerfileContent = strings.Join([]string{dockerfileContent, CodeServerInstall, entryScriptCreation, Entrypoint}, "\n")
 
 	return dockerfileContent, nil
+}
+
+func makeRandomString() string {
+	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]rune, 16)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func NewContainerContext(tag string, devcontainer DevContainer, serviceURL ServiceURL) (ContainerContext, error) {
+	name := makeRandomString()
+	portBinding := fmt.Sprintf("0.0.0.0:%d:8080", serviceURL.Port)
+	args := []string{"run", "--rm", "-p", portBinding, "--name", name}
+
+	workspaceBinding, err := getWorkspaceBinding(devcontainer)
+	if err != nil {
+		return ContainerContext{}, err
+	}
+	args = append(args, "--mount", workspaceBinding)
+
+	args = append(args, "-w", serviceURL.WorkspaceFolder)
+
+	for _, v := range devcontainer.RunArgs {
+		args = append(args, v)
+	}
+	for _, v := range devcontainer.ForwardPorts {
+		args = append(args, "-p", v)
+	}
+	if devcontainer.RemoteUser != "" {
+		args = append(args, "-u", devcontainer.RemoteUser)
+	}
+	args = append(args, tag)
+	args = append(args)
+
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	ctx := ContainerContext{
+		cmd:  cmd,
+		name: name,
+	}
+	return ctx, nil
 }

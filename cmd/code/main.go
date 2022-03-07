@@ -70,13 +70,13 @@ func main() {
 				return err
 			}
 
-			cmd, err := project.CreateRunCmd(tag, devcontainerObj, url)
+			ctx, err := project.NewContainerContext(tag, devcontainerObj, url)
 			if err != nil {
 				return err
 			}
 
 			prettyUrlPrint(url)
-			cmd.Run()
+			ctx.Run()
 
 			return nil
 		},
