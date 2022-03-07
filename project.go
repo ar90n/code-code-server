@@ -83,6 +83,14 @@ func getImageTag(devcontainer DevContainer) string {
 	return fmt.Sprintf("%s_code_coder_server", name)
 }
 
+func getBuildContext(devcontainer DevContainer) string {
+	if filepath.IsAbs(devcontainer.Build.Context) {
+		return devcontainer.Build.Context
+	} else {
+		return filepath.Join(devcontainer.DirPath, devcontainer.Build.Context)
+	}
+}
+
 func BuildImage(devcontainer DevContainer) (string, error) {
 	dockerfileContent, err := wrapDockerFile(devcontainer)
 	if err != nil {
@@ -90,12 +98,7 @@ func BuildImage(devcontainer DevContainer) (string, error) {
 	}
 
 	tag := getImageTag(devcontainer)
-	var context string
-	if devcontainer.Build.Context != "" {
-		context = devcontainer.Build.Context
-	} else {
-		context = devcontainer.DirPath
-	}
+	context := getBuildContext(devcontainer)
 
 	args := []string{"build", "-t", tag, "-f", "-"}
 	for k, v := range devcontainer.Build.Args {
