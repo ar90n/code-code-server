@@ -3,6 +3,7 @@ package project
 import (
 	"fmt"
 	"github.com/buildkite/interpolate"
+	"github.com/flynn/json5"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -29,7 +30,7 @@ type DevContainer struct {
 	RunArgs           []string                 `json:"runArgs"`
 	WorkspaceMount    string                   `json:"workspaceMount"`
 	WorkspaceFolder   string                   `json:"workspaceFolder"`
-	Settings          map[string]string        `json:"settings"`
+	Settings          json5.RawMessage         `json:"settings"`
 	Extensions        []string                 `json:"extensions"`
 	ForwardPorts      []string                 `json:"forwardPorts"`
 	PortsAttributes   map[string]PortAttribute `json:"portsAttributes"`
@@ -178,9 +179,6 @@ func getMapEnv(devcontainer DevContainer) interpolate.Env {
 		"localWorkspaceFolder":         localWorkspaceFolder,
 		"localWorkspaceFolderBasename": localWorkspaceFolderBasename,
 	}
-	for k, v := range devcontainer.Settings {
-		env[k] = v
-	}
 	return interpolate.NewMapEnv(env)
 }
 
@@ -210,7 +208,7 @@ func createEntryScriptCommands(devcontainer DevContainer) ([]string, error) {
 		scriptCommands = append(scriptCommands, fmt.Sprintf("code-server --install-extension %s", v))
 	}
 	scriptCommands = append(scriptCommands, `echo "auth: none" > /tmp/config.yml`)
-	scriptCommands = append(scriptCommands, `code-server --config /tmp/config.yml --bind-addr 0.0.0.0:8080`)
+	scriptCommands = append(scriptCommands, `code-server --user-data-dir /opt/code-server/.vscode --config /tmp/config.yml --bind-addr 0.0.0.0:8080`)
 	return scriptCommands, nil
 }
 
@@ -231,6 +229,16 @@ func createEntryScript(devcontainer DevContainer) (string, error) {
 	return result, nil
 }
 
+func createSettingJson(devcontainer DevContainer) (string, error) {
+	settingJsonContents := strings.ReplaceAll(string(devcontainer.Settings), "\n", "")
+	dockerfileCommands := []string{
+		`RUN mkdir -p /opt/code-server/.vscode`,
+		fmt.Sprintf(`RUN echo '%s' > /opt/code-server/.vscode/setting.json`, settingJsonContents),
+	}
+	result := strings.Join(dockerfileCommands, "\n")
+	return result, nil
+}
+
 const (
 	CodeServerInstall = `RUN curl -fsSL https://code-server.dev/install.sh | sh`
 	Entrypoint        = `ENTRYPOINT ["/opt/code-server/entrypoint.sh"]`
@@ -247,8 +255,13 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 		return "", err
 	}
 
+	settingJsonCreation, err := createSettingJson(devcontainer)
+	if err != nil {
+		return "", err
+	}
+
 	dockerfileContent := string(dockerfile)
-	dockerfileContent = strings.Join([]string{dockerfileContent, CodeServerInstall, entryScriptCreation, Entrypoint}, "\n")
+	dockerfileContent = strings.Join([]string{dockerfileContent, CodeServerInstall, settingJsonCreation, entryScriptCreation, Entrypoint}, "\n")
 
 	return dockerfileContent, nil
 }
