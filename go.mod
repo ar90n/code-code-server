@@ -1,4 +1,4 @@
-module github.com/ar90n/codecodeserver
+module github.com/ar90n/code-code-server
 
 go 1.17
 

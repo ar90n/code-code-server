@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/ar90n/codecodeserver"
+	"github.com/ar90n/code-code-server"
 	"github.com/flynn/json5"
 	"github.com/urfave/cli/v2"
 	"io/ioutil"
