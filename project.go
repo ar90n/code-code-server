@@ -25,6 +25,7 @@ type DevContainer struct {
 	Name    string `json:"name"`
 	Build   struct {
 		Dockerfile string            `json:"dockerfile"`
+		Context    string            `json:"context"`
 		Args       map[string]string `json:"args"`
 	} `json:"build"`
 	RunArgs           []string                 `json:"runArgs"`
@@ -89,7 +90,12 @@ func BuildImage(devcontainer DevContainer) (string, error) {
 	}
 
 	tag := getImageTag(devcontainer)
-	context := devcontainer.DirPath
+	var context string
+	if devcontainer.Build.Context != "" {
+		context = devcontainer.Build.Context
+	} else {
+		context = devcontainer.DirPath
+	}
 
 	args := []string{"build", "-t", tag, "-f", "-"}
 	for k, v := range devcontainer.Build.Args {
