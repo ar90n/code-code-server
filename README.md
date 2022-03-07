@@ -6,7 +6,7 @@ code-server launcher with vscode devcontainer config
 Use `go install` to install code-code-server.
 
 ```bash
-go install github/ar90n/code-code-server
+go install github.com/ar90n/code-code-server/cmd/code@latest
 ```
 
 ## Contributing
