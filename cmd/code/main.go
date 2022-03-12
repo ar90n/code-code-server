@@ -3,30 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/ar90n/code-code-server"
-	"github.com/flynn/json5"
+	"github.com/ar90n/code-code-server/devcontainer"
 	"github.com/urfave/cli/v2"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 )
-
-func parseDevcontainerJson(path string) (project.DevContainer, error) {
-	var devcontainer project.DevContainer
-	raw, err := ioutil.ReadFile(path)
-	if err != nil {
-		return devcontainer, err
-	}
-	if err := json5.Unmarshal(raw, &devcontainer); err != nil {
-		return devcontainer, err
-	}
-	absDirPath, err := filepath.Abs(filepath.Dir(path))
-	if err != nil {
-		return devcontainer, err
-	}
-	devcontainer.DirPath = absDirPath
-	return devcontainer, nil
-}
 
 func prettyUrlPrint(url project.ServiceURL) {
 	log.Printf("==============================================================================================")
@@ -55,7 +37,7 @@ func main() {
 			}
 
 			devcontainerJsonPath := filepath.Join(devcontainerDirPath, "devcontainer.json")
-			devcontainerObj, err := parseDevcontainerJson(devcontainerJsonPath)
+			devcontainerObj, err := devcontainer.ParseJson(devcontainerJsonPath)
 			if err != nil {
 				return err
 			}
