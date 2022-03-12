@@ -55,6 +55,31 @@ And you can access to the code server by the above URL which is `http://tororo.l
 
 ![スクリーンショット 2022-03-07 22 29 31](https://user-images.githubusercontent.com/2285892/157044688-6c1ed4e2-1426-459e-b489-644b6ec9d25b.png)
 
+## Features
+* Dockerfile in devcontainer support
+* Following attributes in devcontainer.json support
+  * name
+  * build
+  * runArgs
+  * workspaceMount
+  * workspaceFolder
+  * settings
+  * extensions
+  * forwardPorts
+  * portsAttributes
+  * postCraeteCommand
+  * remoteUser
+* SettingsSync extension support partially
+  * Only downloading is supported. Uploading is not supported.
+  * Synchronization of settings is done at container building time.
+
+## Settings Sync support
+`code-code-server` only supports shanalikhan's [code-settings-sync](https://github.com/shanalikhan/code-settings-sync) extension partially. 
+This means that `code-code-server` doesn't support vscode builtin SettingsSync feature. And our integration with `code-settings-sync` is not perfect.
+
+### How to use
+Set your Gist ID of cloudSettings which is created by `code-settings-sync` to an Environment Variable whose name is  `SETTINGS_SYNC_GIST_ID`.
+
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
