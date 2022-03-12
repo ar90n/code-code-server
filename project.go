@@ -1,10 +1,17 @@
 package project
 
 import (
+	"bytes"
+	"context"
+	b64 "encoding/base64"
+	"encoding/json"
 	"fmt"
 	"github.com/buildkite/interpolate"
 	"github.com/flynn/json5"
+	"github.com/google/go-github/v43/github"
+	"github.com/imdario/mergo"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net"
 	"os"
@@ -31,7 +38,7 @@ type DevContainer struct {
 	RunArgs           []string                 `json:"runArgs"`
 	WorkspaceMount    string                   `json:"workspaceMount"`
 	WorkspaceFolder   string                   `json:"workspaceFolder"`
-	Settings          json5.RawMessage         `json:"settings"`
+	Settings          map[string]interface{}   `json:"settings"`
 	Extensions        []string                 `json:"extensions"`
 	ForwardPorts      []string                 `json:"forwardPorts"`
 	PortsAttributes   map[string]PortAttribute `json:"portsAttributes"`
@@ -75,6 +82,12 @@ func (c *ContainerContext) waitForSignal() {
 	s := make(chan os.Signal)
 	signal.Notify(s, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	<-s
+}
+
+type KeyBinding struct {
+	Key     string `json:"key"`
+	Command string `json:"command"`
+	When    string `json:"when"`
 }
 
 func getImageTag(devcontainer DevContainer) string {
@@ -142,7 +155,6 @@ func getIPAddress() (string, error) {
 	}
 
 	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
 		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
 				return ipnet.IP.String(), nil
@@ -191,6 +203,14 @@ func getMapEnv(devcontainer DevContainer) interpolate.Env {
 	return interpolate.NewMapEnv(env)
 }
 
+func getSettingsSyncGistId() (string, error) {
+	settingsSyncGistId := os.Getenv("SETTINGS_SYNC_GIST_ID")
+	if settingsSyncGistId == "" {
+		return "", fmt.Errorf("SETTINGS_SYNC_GIST_ID is not set")
+	}
+	return settingsSyncGistId, nil
+}
+
 func getWorkspaceBinding(devcontainer DevContainer) (string, error) {
 	workspaceMount := devcontainer.WorkspaceMount
 	if workspaceMount == "" {
@@ -211,48 +231,132 @@ func getWorkspaceFolder(devcontainer DevContainer) (string, error) {
 	return interpolate.Interpolate(mapEnv, workspaceFolder)
 }
 
-func createEntryScriptCommands(devcontainer DevContainer) ([]string, error) {
+func createEntryScriptCommands(ctx context.Context, devcontainer DevContainer) ([]string, error) {
 	scriptCommands := []string{`#!/bin/bash`, `set -e`, `set -x`, devcontainer.PostCreateCommand}
 	scriptCommands = append(scriptCommands, `code-server --user-data-dir /opt/code-server/.vscode --config /opt/code-server/config.yml --bind-addr 0.0.0.0:8080`)
 	return scriptCommands, nil
 }
 
-func createEntryScript(devcontainer DevContainer) (string, error) {
-	entryScriptCommands, err := createEntryScriptCommands(devcontainer)
+func createEntryScript(ctx context.Context, devcontainer DevContainer) (string, error) {
+	entryScriptCommands, err := createEntryScriptCommands(ctx, devcontainer)
+	if err != nil {
+		return "", err
+	}
+	entryScriptContents := strings.Join(entryScriptCommands, "\n")
+	b64EntryScriptContents := b64.StdEncoding.EncodeToString([]byte(entryScriptContents))
+
+	dockerfileCommands := []string{
+		`RUN mkdir -p /opt/code-server`,
+		`RUN echo '` + b64EntryScriptContents + `' | base64 -d > /opt/code-server/entrypoint.sh`,
+		`RUN chmod +x /opt/code-server/entrypoint.sh`,
+	}
+	result := strings.Join(dockerfileCommands, "\n")
+	return result, nil
+}
+
+func fetchContentsFromGist(ctx context.Context, filename string) (string, error) {
+	gistId, err := getSettingsSyncGistId()
 	if err != nil {
 		return "", err
 	}
 
-	dockerfileCommands := []string{`RUN mkdir -p /opt/code-server`, `RUN { \`}
-	for _, v := range entryScriptCommands {
-		dockerfileCommands = append(dockerfileCommands, fmt.Sprintf(`echo '%s'; \`, v))
+	client := github.NewClient(nil)
+	gist, _, err := client.Gists.Get(ctx, gistId)
+	if err != nil {
+		return "", err
 	}
-	dockerfileCommands = append(dockerfileCommands, `} > /opt/code-server/entrypoint.sh`)
-	dockerfileCommands = append(dockerfileCommands, `RUN chmod +x /opt/code-server/entrypoint.sh`)
 
-	result := strings.Join(dockerfileCommands, "\n")
-	return result, nil
+	gistFile, ok := gist.GetFiles()[github.GistFilename(filename)]
+	if !ok {
+		return "", fmt.Errorf("%s not found in gist", filename)
+	}
+
+	return gistFile.GetContent(), nil
 }
 
-func createSettingJson(devcontainer DevContainer) (string, error) {
-	settingJsonContents := strings.ReplaceAll(string(devcontainer.Settings), "\n", "")
+func dumpAsJson(obj interface{}) (string, error) {
+	data := new(bytes.Buffer)
+	encoder := json.NewEncoder(data)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(obj)
+
+	var out bytes.Buffer
+	err := json.Indent(&out, data.Bytes(), "", "  ")
+	if err != nil {
+		return "", err
+	}
+
+	return out.String(), nil
+}
+
+func createSettingJson(ctx context.Context, devcontainer DevContainer) (string, error) {
+	settings := devcontainer.Settings
+	if settings == nil {
+		settings = map[string]interface{}{}
+	}
+
+	if contentsFromSync, err := fetchContentsFromGist(ctx, "settings.json"); err == nil {
+		var obj map[string]interface{}
+		if err := json5.Unmarshal([]byte(contentsFromSync), &obj); err == nil {
+			mergo.Merge(&settings, obj)
+		}
+	}
+
+	settingsJsonContents, err := dumpAsJson(settings)
+	if err != nil {
+		return "", err
+	}
+
+	b64SettingsJsonContents := b64.StdEncoding.EncodeToString([]byte(settingsJsonContents))
 	dockerfileCommands := []string{
-		`RUN mkdir -p /opt/code-server/.vscode`,
-		fmt.Sprintf(`RUN echo '%s' > /opt/code-server/.vscode/setting.json`, settingJsonContents),
+		`RUN mkdir -p /opt/code-server/.vscode/User`,
+		`RUN echo '` + b64SettingsJsonContents + `' | base64 -d > /opt/code-server/.vscode/User/settings.json`,
 	}
 	result := strings.Join(dockerfileCommands, "\n")
 	return result, nil
 }
 
-func modifyCodeServerDirPermissions(devcontainer DevContainer) (string, error) {
-	dockerfileCommands := []string{
-		`RUN chmod -R o+wr /opt/code-server/`,
+func createKeybindingsJson(ctx context.Context, devcontainer DevContainer) (string, error) {
+	keybindingsJsonFilenames := [...]string{
+		"keybindings.json",
+		"keybindingsMac.json",
 	}
-	result := strings.Join(dockerfileCommands, "\n")
-	return result, nil
+
+	for _, filename := range keybindingsJsonFilenames {
+		if contentsFromSync, err := fetchContentsFromGist(ctx, filename); err == nil {
+			if len(contentsFromSync) == 0 {
+				continue
+			}
+
+			var obj []KeyBinding
+			err := json5.Unmarshal([]byte(contentsFromSync), &obj)
+			if err != nil {
+				continue
+			}
+
+			keybindingsJsonContents, err := dumpAsJson(obj)
+			if err != nil {
+				continue
+			}
+
+			b64KeybindingsJsonContents := b64.StdEncoding.EncodeToString([]byte(keybindingsJsonContents))
+			dockerfileCommands := []string{
+				`RUN mkdir -p /opt/code-server/.vscode/User`,
+				`RUN echo '` + b64KeybindingsJsonContents + `' | base64 -d > /opt/code-server/.vscode/User/keybindings.json`,
+			}
+			result := strings.Join(dockerfileCommands, "\n")
+			return result, nil
+		}
+	}
+
+	return "", nil
 }
 
-func installExtensions(devcontainer DevContainer) (string, error) {
+func modifyCodeServerDirPermissions(ctx context.Context, devcontainer DevContainer) (string, error) {
+	return `RUN chmod -R o+wr /opt/code-server/`, nil
+}
+
+func installExtensions(ctx context.Context, devcontainer DevContainer) (string, error) {
 	commands := []string{}
 	for _, v := range devcontainer.Extensions {
 		commands = append(commands, fmt.Sprintf("RUN code-server --install-extension %s --extensions-dir /opt/code-server/.vscode/extensions/", v))
@@ -262,7 +366,7 @@ func installExtensions(devcontainer DevContainer) (string, error) {
 	return result, nil
 }
 
-func createConfigYaml(container DevContainer) (string, error) {
+func createConfigYaml(ctx context.Context, container DevContainer) (string, error) {
 	return `RUN echo "auth: none" > /opt/code-server/config.yml`, nil
 }
 
@@ -272,35 +376,47 @@ const (
 )
 
 func wrapDockerFile(devcontainer DevContainer) (string, error) {
+	ctx := context.Background()
+
 	dockerfilePath := filepath.Join(devcontainer.DirPath, devcontainer.Build.Dockerfile)
 	dockerfile, err := ioutil.ReadFile(dockerfilePath)
 	if err != nil {
 		return "", err
 	}
 
-	entryScriptCreation, err := createEntryScript(devcontainer)
+	entryScriptCreation, err := createEntryScript(ctx, devcontainer)
 	if err != nil {
 		return "", err
 	}
 
-	extensionsInstallation, err := installExtensions(devcontainer)
+	extensionsInstallation, err := installExtensions(ctx, devcontainer)
 	if err != nil {
-		return "", err
+		log.Print(err)
+		extensionsInstallation = ""
 	}
 
-	codeServerDirPermissionModification, err := modifyCodeServerDirPermissions(devcontainer)
+	codeServerDirPermissionModification, err := modifyCodeServerDirPermissions(ctx, devcontainer)
 	if err != nil {
-		return "", err
+		log.Print(err)
+		codeServerDirPermissionModification = ""
 	}
 
-	configYamlCreation, err := createConfigYaml(devcontainer)
+	configYamlCreation, err := createConfigYaml(ctx, devcontainer)
 	if err != nil {
-		return "", err
+		log.Print(err)
+		configYamlCreation = ""
 	}
 
-	settingJsonCreation, err := createSettingJson(devcontainer)
+	settingJsonCreation, err := createSettingJson(ctx, devcontainer)
 	if err != nil {
-		return "", err
+		log.Print(err)
+		settingJsonCreation = ""
+	}
+
+	keybindingsJsonCreation, err := createKeybindingsJson(ctx, devcontainer)
+	if err != nil {
+		log.Print(err)
+		keybindingsJsonCreation = ""
 	}
 
 	dockerfileContent := string(dockerfile)
@@ -308,6 +424,7 @@ func wrapDockerFile(devcontainer DevContainer) (string, error) {
 		dockerfileContent,
 		CodeServerInstall,
 		settingJsonCreation,
+		keybindingsJsonCreation,
 		entryScriptCreation,
 		extensionsInstallation,
 		configYamlCreation,
