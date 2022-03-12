@@ -19,7 +19,7 @@ func prettyUrlPrint(url project.ServiceURL) {
 func main() {
 	app := &cli.App{
 		Name:    "code",
-		Version: "0.0.1",
+		Version: "0.1.0",
 		Usage:   "code",
 		Action: func(c *cli.Context) error {
 			if c.Args().Len() == 0 {
