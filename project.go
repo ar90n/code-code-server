@@ -48,7 +48,7 @@ func (c *ContainerContext) stop() error {
 }
 
 func (c *ContainerContext) waitForSignal() {
-	s := make(chan os.Signal)
+	s := make(chan os.Signal, 1)
 	signal.Notify(s, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	<-s
 }
