@@ -7,12 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	. "github.com/ar90n/code-code-server/devcontainer"
+	. "github.com/ar90n/code-code-server/settings"
 	"github.com/flynn/json5"
-	"github.com/google/go-github/v43/github"
 	"github.com/imdario/mergo"
 	"io/ioutil"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -27,14 +26,6 @@ const (
 	CodeServerInstall = `RUN curl -fsSL https://code-server.dev/install.sh | sh`
 	Entrypoint        = `ENTRYPOINT ["/opt/code-server/entrypoint.sh"]`
 )
-
-func getSettingsSyncGistId() (string, error) {
-	settingsSyncGistId := os.Getenv("SETTINGS_SYNC_GIST_ID")
-	if settingsSyncGistId == "" {
-		return "", fmt.Errorf("SETTINGS_SYNC_GIST_ID is not set")
-	}
-	return settingsSyncGistId, nil
-}
 
 func createEntryScriptCommands(ctx context.Context, devcontainer DevContainer) ([]string, error) {
 	scriptCommands := []string{`#!/bin/bash`, `set -e`, `set -x`, devcontainer.PostCreateCommand}
@@ -59,26 +50,6 @@ func createEntryScript(ctx context.Context, devcontainer DevContainer) (string, 
 	return result, nil
 }
 
-func fetchContentsFromGist(ctx context.Context, filename string) (string, error) {
-	gistId, err := getSettingsSyncGistId()
-	if err != nil {
-		return "", err
-	}
-
-	client := github.NewClient(nil)
-	gist, _, err := client.Gists.Get(ctx, gistId)
-	if err != nil {
-		return "", err
-	}
-
-	gistFile, ok := gist.GetFiles()[github.GistFilename(filename)]
-	if !ok {
-		return "", fmt.Errorf("%s not found in gist", filename)
-	}
-
-	return gistFile.GetContent(), nil
-}
-
 func dumpAsJson(obj interface{}) (string, error) {
 	data := new(bytes.Buffer)
 	encoder := json.NewEncoder(data)
@@ -94,13 +65,13 @@ func dumpAsJson(obj interface{}) (string, error) {
 	return out.String(), nil
 }
 
-func createSettingJson(ctx context.Context, devcontainer DevContainer) (string, error) {
+func createSettingJson(ctx context.Context, devcontainer DevContainer, repository Repository) (string, error) {
 	settings := devcontainer.Settings
 	if settings == nil {
 		settings = map[string]interface{}{}
 	}
 
-	if contentsFromSync, err := fetchContentsFromGist(ctx, "settings.json"); err == nil {
+	if contentsFromSync, err := repository.Get(ctx, "settings.json"); err == nil {
 		var obj map[string]interface{}
 		if err := json5.Unmarshal([]byte(contentsFromSync), &obj); err == nil {
 			mergo.Merge(&settings, obj)
@@ -121,14 +92,14 @@ func createSettingJson(ctx context.Context, devcontainer DevContainer) (string, 
 	return result, nil
 }
 
-func createKeybindingsJson(ctx context.Context, devcontainer DevContainer) (string, error) {
+func createKeybindingsJson(ctx context.Context, devcontainer DevContainer, repository Repository) (string, error) {
 	keybindingsJsonFilenames := [...]string{
 		"keybindings.json",
 		"keybindingsMac.json",
 	}
 
 	for _, filename := range keybindingsJsonFilenames {
-		if contentsFromSync, err := fetchContentsFromGist(ctx, filename); err == nil {
+		if contentsFromSync, err := repository.Get(ctx, filename); err == nil {
 			if len(contentsFromSync) == 0 {
 				continue
 			}
@@ -175,7 +146,7 @@ func createConfigYaml(ctx context.Context, container DevContainer) (string, erro
 	return `RUN echo "auth: none" > /opt/code-server/config.yml`, nil
 }
 
-func WrapDockerFile(devcontainer DevContainer) (string, error) {
+func WrapDockerFile(devcontainer DevContainer, repository Repository) (string, error) {
 	ctx := context.Background()
 
 	dockerfilePath := filepath.Join(devcontainer.DirPath, devcontainer.Build.Dockerfile)
@@ -207,13 +178,13 @@ func WrapDockerFile(devcontainer DevContainer) (string, error) {
 		configYamlCreation = ""
 	}
 
-	settingJsonCreation, err := createSettingJson(ctx, devcontainer)
+	settingJsonCreation, err := createSettingJson(ctx, devcontainer, repository)
 	if err != nil {
 		log.Print(err)
 		settingJsonCreation = ""
 	}
 
-	keybindingsJsonCreation, err := createKeybindingsJson(ctx, devcontainer)
+	keybindingsJsonCreation, err := createKeybindingsJson(ctx, devcontainer, repository)
 	if err != nil {
 		log.Print(err)
 		keybindingsJsonCreation = ""
