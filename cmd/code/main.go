@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/ar90n/code-code-server"
-	"github.com/ar90n/code-code-server/devcontainer"
-	"github.com/urfave/cli/v2"
 	"log"
 	"os"
 	"path/filepath"
+
+	project "github.com/ar90n/code-code-server"
+	"github.com/ar90n/code-code-server/devcontainer"
+	"github.com/ar90n/code-code-server/settings/gist"
+	"github.com/urfave/cli/v2"
 )
 
 func prettyUrlPrint(url project.ServiceURL) {
@@ -42,7 +44,12 @@ func main() {
 				return err
 			}
 
-			tag, err := project.BuildImage(devcontainerObj)
+			settingsRepository, err := gist.New()
+			if err != nil {
+				return err
+			}
+
+			tag, err := project.BuildImage(devcontainerObj, &settingsRepository)
 			if err != nil {
 				return err
 			}

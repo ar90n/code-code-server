@@ -4,6 +4,7 @@ import (
 	"fmt"
 	. "github.com/ar90n/code-code-server/devcontainer"
 	. "github.com/ar90n/code-code-server/dockerfile"
+	. "github.com/ar90n/code-code-server/settings"
 	"github.com/buildkite/interpolate"
 	"math/rand"
 	"net"
@@ -67,8 +68,8 @@ func getBuildContext(devcontainer DevContainer) string {
 	}
 }
 
-func BuildImage(devcontainer DevContainer) (string, error) {
-	dockerfileContent, err := WrapDockerFile(devcontainer)
+func BuildImage(devcontainer DevContainer, repository Repository) (string, error) {
+	dockerfileContent, err := WrapDockerFile(devcontainer, repository)
 	if err != nil {
 		return "", err
 	}
